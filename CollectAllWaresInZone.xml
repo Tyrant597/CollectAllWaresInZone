@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Collect All Wares In Zone - by Tyrant597 -->
+<aiscript name="CollectAllWaresInZone" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="aiscripts.xsd">
+	<order id="CollectAllWaresInZone" name="Collect Wares In A Zone" description="AI to collect all wares in a zone." category="trade" infinite="true">
+		<params>
+			<param name="zone" default="this.sector" type="object" required="true" text="Zone to Collect In">
+				<input_param name="class" value="[class.sector]"/>
+			</param>
+			<param name="dock" default="false" type="bool" text="Dock when complete?"/>
+			<param name="repeat" default="false" type="bool" text="Repeat Until Cancelled?"/>
+		</params>
+		<requires>
+			<match shiptype="shiptype.lasertower" negate="true"/>
+			<match class="[class.ship_l, class.ship_xl]" negate="true"/>
+		</requires>
+	</order>
+		<interrupts>
+			<handler ref="SectorChangeHandler"/>
+			<handler ref="AttackHandler" />
+			<handler ref="MissileLockHandler" />
+			<handler ref="ScannedHandler" />
+			<handler ref="InspectedHandler"/>
+			<handler ref="FoundAbandonedHandler"/>
+			<handler ref="ResupplyHandler" />
+			<handler ref="JobRemoveRequestHandler" />
+			<handler ref="TargetInvalidHandler"/>
+		</interrupts>
+
+		<init>
+			<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Log File Init'" output="false" append="true" />
+			<!--<cancel_all_orders object="this.object" />	-->
+			<cancel_all_orders object="this.ship"/>
+			<set_order_syncpoint_reached order="this.ship.order"/>
+		</init>
+		<attention min="unknown">
+			<actions>
+				<do_if value="this.ship.sector != $zone">
+					<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Moving to target zone: '+$zone.knownname" output="false" append="true" />
+					<run_script name="'move.generic'" immediate="true">
+						<param name="destination" value="$zone"/>
+						<param name="endintargetzone" value="true"/>
+					</run_script>
+					<!--<create_order id="'MoveGeneric'" object="this.ship" immediate="true">
+						<param name="destination" value="$zone"/>
+						<param name="endintargetzone" value="true"/>
+					</create_order>-->
+				</do_if>				
+				
+				<label name="start" />
+				
+				 <find_object groupname="$drops" class="class.drop" space="$zone" multiple="true" > 
+					<match class="class.collectableammo" negate="true"/> <!-- Don't collect ammo until they fix the bug. -->
+					<match_distance object="this.ship" max="this.ship.maxradarrange*30"/> <!-- Don't want to be flying 10000km out to get some bugged drop. -->
+				 </find_object>
+				 <do_if value="$drops.count">
+					<!--<do_if value="this.ship.dock">
+						<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Undocking.'" output="false" append="true" />
+						<create_order id="'Undock'">
+							<param name="skipwait" value="true"/>
+						</create_order>
+					</do_if>-->
+					<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Found '+$drops.count+' drops.'" output="false" append="true" />
+					<run_script name="'move.collect.ship.smallship'">
+						<param name="targets" value="$drops"/>
+					</run_script>
+				 </do_if>
+				 <do_else>
+					<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Found 0 drops.'" output="false" append="true" />
+					<do_if value="not $repeat"> <!-- Case: Nothing to collect, Repeat off. -->
+						<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Quitting.'" output="false" append="true" />
+						<resume label="finish"/>
+					</do_if>
+				</do_else>
+				<do_if value="not this.ship.dock">			
+					<do_if value="$dock">
+						<set_value name="$stations" exact="[]"/>
+						<find_station name="$stations" functional="true" space="$zone" multiple="true" knownto="this.owner">
+							<match_relation_to object="this" relation="enemy" comparison="not" />
+						</find_station>
+						<do_if value="$stations.count">
+							<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Found '+$stations.count+' stations.'" output="false" append="true" />
+							<set_value name="$closestStation" exact="$stations.{1}"/>
+							<do_all exact="$stations.count" counter="$i">
+								<do_if value="$stations.{$i}.distanceto.{this.ship} lt $closestStation.distanceto.{this.ship}">
+									<set_value name="$closestStation" exact="$stations.{$i}"/>
+									<wait exact="1ms"/>
+								</do_if>
+							</do_all>
+							<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Found closest station '+$closestStation.knownname" output="false" append="true" />
+							<create_order object="this.ship" id="'DockAndWait'">
+								<param name="destination" value="$closestStation"/>
+								<param name="timeout" value="30s"/>
+							</create_order>
+							<!--<create_order object="this.ship" id="'DockAt'" immediate="true">
+								<param name="destination" value="$closestStation" />
+							</create_order>-->
+							<!--<run_script name="'order.dock'">
+								<param name="destination" value="$closestStation"/>
+							</run_script>-->
+						</do_if>
+						<!-- Case: no friendly stations -->
+						<do_else>
+							<debug_to_file name="this.ship.knownname" directory="'CollectWaresZone'" text="'Found 0 friendly stations in zone.'" output="false" append="true" />
+						</do_else>
+					</do_if>
+				</do_if>
+				<do_if value="$repeat">					
+					<wait exact="30s"/>
+					<resume label="start"/>					
+				</do_if>
+				<do_else>
+					<resume label="finish"/>
+				</do_else>
+				
+				<label name="finish"/>
+				
+				<!--<set_order_syncpoint_reached order="this.ship.order"/>-->
+				<cancel_order order="this.ship.defaultorder" />
+			</actions>
+		</attention>
+</aiscript>
